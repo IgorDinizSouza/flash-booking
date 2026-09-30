@@ -67,6 +67,24 @@ public class ReservationRepository {
                 .optional();
     }
 
+    /** Reserva que acabou de ser cancelada: dados necessarios para o historico e a devolucao de estoque. */
+    public record Cancelled(UUID eventId, int quantity) {
+    }
+
+    /**
+     * Transicao condicional PENDING -> CANCELLED (PLANO.md 5.3). So quem consegue a transicao devolve
+     * estoque; sob concorrencia o UPDATE espera o lock da linha e reavalia o predicado.
+     *
+     * @return dados da reserva cancelada, ou vazio se 0 linhas (inexistente, ja CANCELLED, EXPIRED ou vencida)
+     */
+    public Optional<Cancelled> cancelIfPendingAndNotExpired(UUID id) {
+        return jdbc.sql("UPDATE reservations SET status = 'CANCELLED', updated_at = NOW() "
+                + "WHERE id = :id AND status = 'PENDING' AND expires_at > NOW() RETURNING event_id, quantity")
+                .param("id", id)
+                .query((rs, n) -> new Cancelled(rs.getObject("event_id", UUID.class), rs.getInt("quantity")))
+                .optional();
+    }
+
     private static boolean hasSqlState(Throwable ex, String sqlState) {
         for (Throwable t = ex; t != null; t = (t.getCause() == t ? null : t.getCause())) {
             if (t instanceof SQLException sql && sqlState.equals(sql.getSQLState())) {

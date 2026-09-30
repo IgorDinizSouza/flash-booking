@@ -151,6 +151,54 @@ public class ReservationService implements IReservationService {
     }
 
     @Override
+    public void cancel(UUID id) {
+        try {
+            tx.executeWithoutResult(status -> doCancel(id));
+        } catch (BusinessException ex) {
+            if (ex.getCode() == ErrorCode.INVALID_RESERVATION_STATE) {
+                meters.counter("reservations.rejected", "reason", "invalid_state").increment();
+            }
+            throw ex;
+        }
+    }
+
+    private void doCancel(UUID id) {
+        txSupport.applyTimeouts();
+
+        var cancelled = reservationRepository.cancelIfPendingAndNotExpired(id);
+        if (cancelled.isEmpty()) {
+            rejectOrIgnore(id);
+            return;
+        }
+        var c = cancelled.get();
+        historyRepository.insert(id, c.eventId(), HistoryAction.CANCELLED, ReservationStatus.PENDING,
+                ReservationStatus.CANCELLED, c.quantity(), "CLIENT_REQUEST", audit.correlationId(),
+                audit.instanceId());
+        // hot row por ultimo, imediatamente antes do commit
+        eventRepository.increment(c.eventId(), c.quantity());
+        log.info("reservation cancelled reservation={} event={} quantity={}", id, c.eventId(), c.quantity());
+
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                meters.counter("reservations.cancelled").increment();
+            }
+        });
+    }
+
+    /** Caminho de 0 linhas (fora do caminho quente): 404, 204 silencioso (ja CANCELLED) ou 409. */
+    private void rejectOrIgnore(UUID id) {
+        var current = reservationRepository.findById(id)
+                .orElseThrow(() -> new BusinessException(ErrorCode.RESERVATION_NOT_FOUND));
+        if (current.status() == ReservationStatus.CANCELLED) {
+            log.info("cancel is a no-op, reservation already cancelled reservation={}", id);
+            return;
+        }
+        // EXPIRED, ou PENDING ja vencida (o job ainda nao rodou)
+        throw new BusinessException(ErrorCode.INVALID_RESERVATION_STATE);
+    }
+
+    @Override
     public ReservationResponse getById(UUID id) {
         return reservationRepository.findById(id)
                 .map(ReservationResponse::from)

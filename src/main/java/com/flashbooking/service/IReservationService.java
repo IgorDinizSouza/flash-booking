@@ -13,4 +13,12 @@ public interface IReservationService {
 
     /** Leitura direta do banco (sem cache) com status efetivo. */
     ReservationResponse getById(UUID id);
+
+    /**
+     * Cancela a reserva (PLANO.md 5.3). Retorna sem erro quando cancelou ou ja estava CANCELLED
+     * (idempotente, sem devolver estoque de novo).
+     *
+     * @throws com.flashbooking.exception.BusinessException RESERVATION_NOT_FOUND ou INVALID_RESERVATION_STATE
+     */
+    void cancel(UUID id);
 }

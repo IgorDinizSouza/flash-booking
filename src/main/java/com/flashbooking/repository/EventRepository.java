@@ -51,6 +51,19 @@ public class EventRepository {
                 .update();
     }
 
+    /**
+     * Devolucao de estoque (cancelamento/expiracao). O CHECK available <= total_capacity e a rede de
+     * seguranca: se a invariante quebrar, o UPDATE falha alto (DataIntegrityViolationException).
+     *
+     * @return linhas afetadas
+     */
+    public int increment(UUID eventId, int quantity) {
+        return jdbc.sql("UPDATE events SET available = available + :q WHERE id = :id")
+                .param("q", quantity)
+                .param("id", eventId)
+                .update();
+    }
+
     private static Event map(ResultSet rs, int rowNum) throws SQLException {
         return new Event(
                 rs.getObject("id", UUID.class),
