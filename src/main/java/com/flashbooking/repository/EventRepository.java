@@ -38,6 +38,19 @@ public class EventRepository {
                 .optional();
     }
 
+    /**
+     * Baixa atomica de estoque (sem SELECT previo). Como eventos nunca sao removidos, 0 linhas
+     * significa apenas estoque insuficiente quando o evento ja foi validado por FK.
+     *
+     * @return linhas afetadas (1 = baixou, 0 = sem estoque suficiente)
+     */
+    public int decrementIfAvailable(UUID eventId, int quantity) {
+        return jdbc.sql("UPDATE events SET available = available - :q WHERE id = :id AND available >= :q")
+                .param("q", quantity)
+                .param("id", eventId)
+                .update();
+    }
+
     private static Event map(ResultSet rs, int rowNum) throws SQLException {
         return new Event(
                 rs.getObject("id", UUID.class),
