@@ -11,7 +11,9 @@ public abstract class AbstractIntegrationTest {
 
     // Container estatico compartilhado por todas as classes de teste (singleton; o Ryuk o remove ao fim da JVM).
     @ServiceConnection
-    static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16");
+    public static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16")
+            // varios contextos Spring em cache (pools de 20) + as duas instancias do teste multi-instancia
+            .withCommand("postgres", "-c", "max_connections=300");
 
     static {
         POSTGRES.start();
