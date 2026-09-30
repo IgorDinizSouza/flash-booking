@@ -27,6 +27,8 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 import com.flashbooking.filter.CorrelationIdFilter;
 import com.flashbooking.model.enums.ErrorCode;
 
+import io.micrometer.core.instrument.MeterRegistry;
+
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
@@ -34,6 +36,12 @@ public class GlobalExceptionHandler {
 
     // lock timeout, statement timeout (query cancelled), deadlock
     private static final Set<String> BUSY_SQL_STATES = Set.of("55P03", "57014", "40P01");
+
+    private final MeterRegistry meters;
+
+    public GlobalExceptionHandler(MeterRegistry meters) {
+        this.meters = meters;
+    }
 
     @ExceptionHandler(BusinessException.class)
     public ResponseEntity<ProblemDetail> handleBusiness(BusinessException ex, HttpServletRequest req) {
@@ -104,6 +112,7 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ProblemDetail> handleAny(Exception ex, HttpServletRequest req) {
         if (isDatabaseBusy(ex)) {
             log.warn("database busy on {} {}: {}", req.getMethod(), req.getRequestURI(), ex.getMessage());
+            meters.counter("reservations.rejected", "reason", "db_busy").increment();
             return build(ErrorCode.DATABASE_BUSY, null, req);
         }
         log.error("unexpected error on {} {}", req.getMethod(), req.getRequestURI(), ex);
