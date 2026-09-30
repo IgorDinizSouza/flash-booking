@@ -1,0 +1,41 @@
+server:
+  shutdown: graceful
+
+spring:
+  application:
+    name: flash-booking
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/flashbooking}
+    username: ${SPRING_DATASOURCE_USERNAME:flashbooking}
+    password: ${SPRING_DATASOURCE_PASSWORD:flashbooking}
+    hikari:
+      maximum-pool-size: 20
+      connection-timeout: 3000
+  flyway:
+    enabled: true
+  lifecycle:
+    timeout-per-shutdown-phase: 20s
+
+booking:
+  reservation:
+    ttl: 10m
+    max-quantity: 10
+    expiration-job-enabled: true
+    expiration-job-delay: 5s
+    expiration-batch-size: 100
+  availability-cache:
+    enabled: true
+    ttl: 1s
+  db:
+    lock-timeout: 1s
+    statement-timeout: 3s
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+
+logging:
+  pattern:
+    level: "%5p [%X{correlationId:-}]"

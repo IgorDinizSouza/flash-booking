@@ -1,0 +1,7 @@
+booking:
+  reservation:
+    expiration-job-enabled: false
+  availability-cache:
+    enabled: false
+  db:
+    lock-timeout: 5s
