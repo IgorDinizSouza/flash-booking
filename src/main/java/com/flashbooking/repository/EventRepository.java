@@ -1,42 +1,20 @@
 package com.flashbooking.repository;
 
-import java.sql.ResultSet;
-import java.sql.SQLException;
-import java.time.OffsetDateTime;
 import java.util.Optional;
 import java.util.UUID;
 
-import org.springframework.jdbc.core.simple.JdbcClient;
-import org.springframework.stereotype.Repository;
+import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Param;
 
 import com.flashbooking.model.domain.Event;
 
-@Repository
-public class EventRepository {
+/** SQL em resources/mapper/EventRepository.xml. */
+@Mapper
+public interface EventRepository {
 
-    private static final String COLUMNS = "id, name, total_capacity, available, created_at";
+    Event insert(@Param("name") String name, @Param("capacity") int capacity);
 
-    private final JdbcClient jdbc;
-
-    public EventRepository(JdbcClient jdbc) {
-        this.jdbc = jdbc;
-    }
-
-    public Event insert(String name, int capacity) {
-        return jdbc.sql("INSERT INTO events (name, total_capacity, available) VALUES (:name, :capacity, :capacity) "
-                + "RETURNING " + COLUMNS)
-                .param("name", name)
-                .param("capacity", capacity)
-                .query(EventRepository::map)
-                .single();
-    }
-
-    public Optional<Event> findById(UUID id) {
-        return jdbc.sql("SELECT " + COLUMNS + " FROM events WHERE id = :id")
-                .param("id", id)
-                .query(EventRepository::map)
-                .optional();
-    }
+    Optional<Event> findById(@Param("id") UUID id);
 
     /**
      * Baixa atomica de estoque (sem SELECT previo). Como eventos nunca sao removidos, 0 linhas
@@ -44,12 +22,7 @@ public class EventRepository {
      *
      * @return linhas afetadas (1 = baixou, 0 = sem estoque suficiente)
      */
-    public int decrementIfAvailable(UUID eventId, int quantity) {
-        return jdbc.sql("UPDATE events SET available = available - :q WHERE id = :id AND available >= :q")
-                .param("q", quantity)
-                .param("id", eventId)
-                .update();
-    }
+    int decrementIfAvailable(@Param("eventId") UUID eventId, @Param("quantity") int quantity);
 
     /**
      * Devolucao de estoque (cancelamento/expiracao). O CHECK available <= total_capacity e a rede de
@@ -57,19 +30,5 @@ public class EventRepository {
      *
      * @return linhas afetadas
      */
-    public int increment(UUID eventId, int quantity) {
-        return jdbc.sql("UPDATE events SET available = available + :q WHERE id = :id")
-                .param("q", quantity)
-                .param("id", eventId)
-                .update();
-    }
-
-    private static Event map(ResultSet rs, int rowNum) throws SQLException {
-        return new Event(
-                rs.getObject("id", UUID.class),
-                rs.getString("name"),
-                rs.getInt("total_capacity"),
-                rs.getInt("available"),
-                rs.getObject("created_at", OffsetDateTime.class));
-    }
+    int increment(@Param("eventId") UUID eventId, @Param("quantity") int quantity);
 }

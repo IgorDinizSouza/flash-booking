@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.flashbooking.repository.EventRepository">
+
+    <resultMap id="eventMap" type="com.flashbooking.model.domain.Event">
+        <constructor>
+            <arg column="id" javaType="java.util.UUID"/>
+            <arg column="name" javaType="string"/>
+            <arg column="total_capacity" javaType="_int"/>
+            <arg column="available" javaType="_int"/>
+            <arg column="created_at" javaType="java.time.OffsetDateTime"/>
+        </constructor>
+    </resultMap>
+
+    <sql id="columns">id, name, total_capacity, available, created_at</sql>
+
+    <!-- INSERT ... RETURNING: devolve a linha criada (id/created_at gerados pelo banco) em uma ida ao banco -->
+    <select id="insert" resultMap="eventMap" flushCache="true">
+        INSERT INTO events (name, total_capacity, available)
+        VALUES (#{name}, #{capacity}, #{capacity})
+        RETURNING <include refid="columns"/>
+    </select>
+
+    <select id="findById" resultMap="eventMap">
+        SELECT <include refid="columns"/> FROM events WHERE id = #{id}
+    </select>
+
+    <!-- estoque atomico: o predicado available >= quantity no proprio UPDATE evita oversell sem SELECT previo -->
+    <update id="decrementIfAvailable">
+        UPDATE events SET available = available - #{quantity}
+        WHERE id = #{eventId} AND available >= #{quantity}
+    </update>
+
+    <update id="increment">
+        UPDATE events SET available = available + #{quantity} WHERE id = #{eventId}
+    </update>
+</mapper>

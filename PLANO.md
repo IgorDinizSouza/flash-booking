@@ -32,10 +32,10 @@ Kafka, Redis, Outbox, pagamento/estorno, `CONFIRMED`, clientes, locais, meia-ent
 | Item | Escolha | Motivo |
 |---|---|---|
 | Linguagem | Java 21 | records, virtual threads não necessárias |
-| Framework | Spring Boot 3.3.x | ProblemDetail nativo, JdbcClient |
+| Framework | Spring Boot 3.3.x | ProblemDetail nativo |
 | Build | Maven (wrapper `mvnw`) | simples e conhecido |
 | Banco | PostgreSQL 16 | `SKIP LOCKED`, `UPDATE` atômico, `CHECK` |
-| Acesso a dados | **Spring `JdbcClient` (SQL explícito)**, sem JPA | o SQL crítico é o coração da solução; evita magia do ORM e facilita explicar |
+| Acesso a dados | **MyBatis (SQL explícito em XML)**, sem JPA; transações do Spring | o SQL crítico é o coração da solução; evita magia do ORM e facilita explicar |
 | Migrations | Flyway | lock de migração protege subida simultânea |
 | Cache | Caffeine (local por instância) | consistência eventual sem nova infra |
 | Testes | JUnit 5 + Testcontainers (Postgres real) | locks e transações reais |
@@ -84,7 +84,7 @@ com.flashbooking
 │       ├── ReservationService
 │       ├── ReservationExpirationService
 │       └── IdempotencyService
-├── repository
+├── repository                              (interfaces @Mapper MyBatis; SQL em resources/mapper/*.xml)
 │   ├── EventRepository
 │   ├── ReservationRepository
 │   ├── ReservationHistoryRepository
@@ -541,7 +541,7 @@ Commits pequenos, um por fase (ou por sub-entrega), mensagens no imperativo. O h
 | Decisão | Por quê | Custo / trade-off |
 |---|---|---|
 | Estoque no Postgres com `UPDATE` atômico | garantia forte, simples | hot row em evento muito disputado |
-| `JdbcClient` sem JPA | SQL crítico explícito e explicável | mais código manual de mapeamento |
+| MyBatis com SQL explícito em XML, sem JPA | SQL crítico explícito (`resources/mapper`) e explicável | mais código manual de mapeamento |
 | Idempotência com `INSERT ... ON CONFLICT` na mesma tx | sem estado `PROCESSING`, sem janela de race | erro de negócio não retém a chave |
 | `UPDATE` de estoque por último na tx | menor tempo de lock | ordem menos “natural” de ler |
 | Expiração com `SKIP LOCKED` + agregado por evento ordenado | N instâncias sem líder, sem deadlock | latência de até `job-delay` |

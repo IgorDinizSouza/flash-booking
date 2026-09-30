@@ -2,7 +2,7 @@
 
 API de reservas de ingressos para eventos de alta demanda ("flash sales"). Garante **zero oversell** com múltiplas instâncias da API, **idempotência** na criação de reservas, **expiração automática** de reservas pendentes e **erros explícitos** (RFC 7807). Toda regra crítica vive no PostgreSQL; nenhuma decisão depende da memória de uma instância.
 
-Stack: Java 21, Spring Boot 3.3, PostgreSQL 16, Flyway, Caffeine, springdoc-openapi (Swagger UI), Actuator + Micrometer, Testcontainers, k6, nginx.
+Stack: Java 21, Spring Boot 3.3, PostgreSQL 16, MyBatis (SQL explícito em XML), Flyway, Caffeine, springdoc-openapi (Swagger UI), Actuator + Micrometer, Testcontainers, k6, nginx.
 
 Princípio de projeto: menos infraestrutura, mais solidez. Sem Kafka, Redis, Outbox ou JPA (ver [Decisões](#6-decisões-arquiteturais) e [Evoluções](#11-evoluções-futuras-e-limitações-conhecidas)).
 
@@ -376,7 +376,7 @@ Só transições **efetivas** entram. Requisições rejeitadas (409, 404, 400) f
 | Decisão | Por quê | Custo / trade-off |
 |---|---|---|
 | Estoque no Postgres com `UPDATE ... WHERE available >= :q` atômico, mais `CHECK (available >= 0 AND available <= total_capacity)` | Garantia forte e simples; nunca há `SELECT` seguido de `UPDATE` | Hot row em evento muito disputado (serialização no lock da linha) |
-| `JdbcClient` sem JPA | O SQL crítico fica explícito e explicável | Mais código manual de mapeamento |
+| MyBatis com SQL explícito em XML, sem JPA | O SQL crítico fica explícito, versionado em `src/main/resources/mapper` e explicável | Mais código manual de mapeamento (`resultMap`s e mappers XML) |
 | Idempotência com `INSERT ... ON CONFLICT DO NOTHING` na **mesma transação** | Sem estado `PROCESSING` e sem janela de race: o segundo `INSERT` espera o primeiro terminar e então devolve a resposta salva | Erro de negócio não retém a chave (retry reexecuta) |
 | `UPDATE` do estoque por último na transação | Menor tempo de lock na linha quente | Ordem menos "natural" de ler |
 | Expiração com `FOR UPDATE SKIP LOCKED` e agregado por evento ordenado por `event_id` | N instâncias sem líder, sem deadlock, sem coordenação externa | Latência de até `expiration-job-delay` para devolver estoque |
@@ -445,7 +445,7 @@ com.flashbooking
 ├── controller   EventController, ReservationController
 ├── service      IEventService, IReservationService, IReservationExpirationService, IIdempotencyService
 │   └── impl     EventService, ReservationService, ReservationExpirationService, IdempotencyService, ReservationResult
-├── repository   EventRepository, ReservationRepository, ReservationHistoryRepository, IdempotencyRepository
+├── repository   interfaces MyBatis (@Mapper): EventRepository, ReservationRepository, ReservationHistoryRepository, IdempotencyRepository (SQL em src/main/resources/mapper/*.xml)
 ├── model
 │   ├── domain   records que espelham as tabelas (Event, Reservation, ReservationHistory, IdempotencyKey)
 │   ├── dto      request/ (CreateEventRequest, CreateReservationRequest) e response/ (EventResponse, ReservationResponse)
@@ -453,15 +453,15 @@ com.flashbooking
 ├── job          ReservationExpirationJob
 ├── exception    BusinessException, GlobalExceptionHandler
 ├── filter       CorrelationIdFilter, InstanceIdFilter
-├── config       BookingProperties, CacheConfig, OpenApiConfig
-└── infra        TxSupport, AuditContext
+├── config       BookingProperties, CacheConfig, OpenApiConfig, MyBatisConfig
+└── infra        TxSupport, AuditContext, typehandler/ (UUID e UUID[] para o MyBatis)
 ```
 
 | Camada | Responsabilidade |
 |---|---|
 | `controller` | HTTP: rotas, headers, status e documentação OpenAPI. Sem regra de negócio |
 | `service` | Regras e transações (interfaces `I*` + `impl`); orquestra os repositórios na ordem crítica |
-| `repository` | SQL explícito com `JdbcClient` (o coração da solução) |
+| `repository` | Interfaces `@Mapper` do MyBatis; o SQL explícito (o coração da solução) fica em `src/main/resources/mapper/*.xml` |
 | `model` | Records de domínio, DTOs de request/response e enums |
 | `job` | Gatilho `@Scheduled`; delega ao service de expiração |
 | `exception` | `BusinessException` + `GlobalExceptionHandler` (catálogo de erros em `ProblemDetail`, inclusive o 503) |
@@ -520,7 +520,7 @@ Migrations em `src/main/resources/db/migration`: `V1__create_events`, `V2__creat
 
 **Por que sem Kafka/pagamento?** Nenhum requisito do enunciado justifica; consta como evolução.
 
-**Por que JdbcClient e não JPA?** O SQL crítico (`UPDATE` condicional, `SKIP LOCKED`, `RETURNING`) é o núcleo da solução; SQL explícito é mais fácil de explicar e de raciocinar sobre locks.
+**Por que MyBatis (SQL em XML) e não JPA?** O SQL crítico (`UPDATE` condicional, `SKIP LOCKED`, `RETURNING`) é o núcleo da solução; SQL explícito é mais fácil de explicar e de raciocinar sobre locks.
 
 **Por que interfaces `I*Service`?** Contrato explícito e test doubles, reconhecendo a cerimônia com uma única implementação.
 

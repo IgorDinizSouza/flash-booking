@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.flashbooking.repository.ReservationHistoryRepository">
+
+    <insert id="insert">
+        INSERT INTO reservation_history (reservation_id, event_id, action, previous_status, new_status,
+                                         quantity, reason, correlation_id, instance_id)
+        VALUES (#{reservationId}, #{eventId}, #{action}, #{previousStatus,jdbcType=VARCHAR}, #{newStatus},
+                #{quantity}, #{reason}, #{correlationId,jdbcType=VARCHAR}, #{instanceId,jdbcType=VARCHAR})
+    </insert>
+
+    <!-- um unico INSERT multi-row: atomico e na transacao corrente (uma linha por reserva do lote) -->
+    <insert id="insertRows">
+        INSERT INTO reservation_history (reservation_id, event_id, action, previous_status, new_status,
+                                         quantity, reason, correlation_id, instance_id)
+        VALUES
+        <foreach collection="entries" item="e" separator=",">
+            (#{e.reservationId}, #{e.eventId}, #{action}, #{previousStatus,jdbcType=VARCHAR}, #{newStatus},
+             #{e.quantity}, #{reason}, #{correlationId,jdbcType=VARCHAR}, #{instanceId,jdbcType=VARCHAR})
+        </foreach>
+    </insert>
+</mapper>

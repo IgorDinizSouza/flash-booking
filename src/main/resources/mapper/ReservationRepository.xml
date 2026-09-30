@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.flashbooking.repository.ReservationRepository">
+
+    <resultMap id="reservationMap" type="com.flashbooking.model.domain.Reservation">
+        <constructor>
+            <arg column="id" javaType="java.util.UUID"/>
+            <arg column="event_id" javaType="java.util.UUID"/>
+            <arg column="quantity" javaType="_int"/>
+            <arg column="status" javaType="com.flashbooking.model.enums.ReservationStatus"/>
+            <arg column="effective_status" javaType="com.flashbooking.model.enums.ReservationStatus"/>
+            <arg column="expires_at" javaType="java.time.OffsetDateTime"/>
+            <arg column="created_at" javaType="java.time.OffsetDateTime"/>
+            <arg column="updated_at" javaType="java.time.OffsetDateTime"/>
+        </constructor>
+    </resultMap>
+
+    <resultMap id="insertedMap" type="com.flashbooking.repository.ReservationRepository$Inserted">
+        <constructor>
+            <arg column="created_at" javaType="java.time.OffsetDateTime"/>
+            <arg column="expires_at" javaType="java.time.OffsetDateTime"/>
+        </constructor>
+    </resultMap>
+
+    <resultMap id="cancelledMap" type="com.flashbooking.repository.ReservationRepository$Cancelled">
+        <constructor>
+            <arg column="event_id" javaType="java.util.UUID"/>
+            <arg column="quantity" javaType="_int"/>
+        </constructor>
+    </resultMap>
+
+    <resultMap id="expiredRowMap" type="com.flashbooking.repository.ReservationRepository$ExpiredRow">
+        <constructor>
+            <arg column="id" javaType="java.util.UUID"/>
+            <arg column="event_id" javaType="java.util.UUID"/>
+            <arg column="quantity" javaType="_int"/>
+        </constructor>
+    </resultMap>
+
+    <!-- status efetivo calculado com o relogio do banco (NOW()), sem efeito colateral -->
+    <sql id="columns"><![CDATA[
+        id, event_id, quantity, status,
+        CASE WHEN status = 'PENDING' AND expires_at <= NOW() THEN 'EXPIRED' ELSE status END AS effective_status,
+        expires_at, created_at, updated_at
+    ]]></sql>
+
+    <!-- expires_at/created_at vem do relogio do banco; make_interval(secs => ...) aceita TTL fracionado.
+         Violacao de FK (evento inexistente, 23503) e traduzida no default method insert(). -->
+    <select id="insertReturning" resultMap="insertedMap" flushCache="true">
+        INSERT INTO reservations (id, event_id, quantity, status, expires_at)
+        VALUES (#{id}, #{eventId}, #{quantity}, 'PENDING', NOW() + make_interval(secs => #{ttl}))
+        RETURNING created_at, expires_at
+    </select>
+
+    <select id="findById" resultMap="reservationMap">
+        SELECT <include refid="columns"/> FROM reservations WHERE id = #{id}
+    </select>
+
+    <!-- UPDATE ... RETURNING: so quem ganha a transicao PENDING -> CANCELLED recebe a linha (e devolve estoque) -->
+    <select id="cancelIfPendingAndNotExpired" resultMap="cancelledMap" flushCache="true"><![CDATA[
+        UPDATE reservations SET status = 'CANCELLED', updated_at = NOW()
+        WHERE id = #{id} AND status = 'PENDING' AND expires_at > NOW()
+        RETURNING event_id, quantity
+    ]]></select>
+
+    <!-- FOR UPDATE SKIP LOCKED: instancias concorrentes dividem o lote sem esperar umas pelas outras -->
+    <select id="lockExpiredBatch" resultMap="expiredRowMap" flushCache="true"><![CDATA[
+        SELECT id, event_id, quantity FROM reservations
+        WHERE status = 'PENDING' AND expires_at <= NOW()
+        ORDER BY expires_at LIMIT #{limit} FOR UPDATE SKIP LOCKED
+    ]]></select>
+
+    <update id="markExpiredByIds">
+        UPDATE reservations SET status = 'EXPIRED', updated_at = NOW()
+        WHERE id = ANY(#{ids,typeHandler=com.flashbooking.infra.typehandler.UuidArrayTypeHandler})
+    </update>
+</mapper>
