@@ -3,6 +3,7 @@ package com.flashbooking.repository;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -83,6 +84,31 @@ public class ReservationRepository {
                 .param("id", id)
                 .query((rs, n) -> new Cancelled(rs.getObject("event_id", UUID.class), rs.getInt("quantity")))
                 .optional();
+    }
+
+    /** Reserva vencida travada pelo job de expiracao. */
+    public record ExpiredRow(UUID id, UUID eventId, int quantity) {
+    }
+
+    /**
+     * Trava um lote de reservas PENDING vencidas (PLANO.md 5.4). SKIP LOCKED faz varias instancias
+     * dividirem o trabalho sem esperar umas pelas outras; as linhas ficam travadas ate o fim da transacao.
+     */
+    public List<ExpiredRow> lockExpiredBatch(int limit) {
+        return jdbc.sql("SELECT id, event_id, quantity FROM reservations "
+                + "WHERE status = 'PENDING' AND expires_at <= NOW() "
+                + "ORDER BY expires_at LIMIT :limit FOR UPDATE SKIP LOCKED")
+                .param("limit", limit)
+                .query((rs, n) -> new ExpiredRow(rs.getObject("id", UUID.class),
+                        rs.getObject("event_id", UUID.class), rs.getInt("quantity")))
+                .list();
+    }
+
+    /** PENDING -> EXPIRED para linhas ja travadas por {@link #lockExpiredBatch(int)}. */
+    public int markExpired(List<UUID> ids) {
+        return jdbc.sql("UPDATE reservations SET status = 'EXPIRED', updated_at = NOW() WHERE id = ANY(:ids)")
+                .param("ids", ids.toArray(new UUID[0]))
+                .update();
     }
 
     private static boolean hasSqlState(Throwable ex, String sqlState) {
