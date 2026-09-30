@@ -20,6 +20,9 @@ const PARALLEL_SAME_KEY = 20;
 const CACHE_TTL_WAIT_S = 1.5;
 const MAX_RETRIES_503 = 3;
 
+// 409 (capacidade esgotada / conflito de chave) e resposta esperada nos cenarios; 503 e 5xx nao.
+http.setResponseCallback(http.expectedStatuses(200, 201, 204, 409));
+
 const created201 = new Counter('reservations_created_201');
 const insufficient409 = new Counter('reservations_insufficient_409');
 const unexpected5xx = new Counter('unexpected_5xx');
@@ -45,7 +48,7 @@ export const options = {
       iterations: 1,
       maxDuration: '30s',
       exec: 'sameKey',
-      startTime: '20s',
+      startTime: '10s',
     },
     distribution: {
       executor: 'shared-iterations',
@@ -53,10 +56,11 @@ export const options = {
       iterations: 40,
       maxDuration: '30s',
       exec: 'distribution',
-      startTime: '30s',
+      startTime: '15s',
     },
   },
   thresholds: {
+    http_req_failed: ['rate==0'],
     unexpected_5xx: ['count==0'],
     unexpected_other: ['count==0'],
     reservations_created_201: [`count==${CAPACITY_STAMPEDE}`],

@@ -2,3 +2,10 @@
 mvnw text eol=lf
 *.sh text eol=lf
 *.cmd text eol=crlf
+Dockerfile text eol=lf
+.dockerignore text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.conf text eol=lf
+*.js text eol=lf
+*.http text eol=lf
