@@ -3,6 +3,8 @@ target/
 *.class
 *.log
 .env
+*.env
+!credencias.env.example
 .idea/
 *.iml
 .vscode/

@@ -1,5 +1,8 @@
 .git
 .gitignore
+*.env
+credencias.env
+credencias.env.example
 .idea
 .vscode
 *.iml

@@ -4,13 +4,18 @@ server:
 spring:
   application:
     name: flash-booking
+  config:
+    # Fora do Docker, carrega o arquivo local de credenciais (ignorado se nao existir).
+    # No Docker Compose as mesmas variaveis chegam por env_file.
+    import: optional:file:./credencias.env[.properties]
   datasource:
-    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/flashbooking}
-    username: ${SPRING_DATASOURCE_USERNAME:flashbooking}
-    password: ${SPRING_DATASOURCE_PASSWORD:flashbooking}
+    # Credenciais e conexao vem SOMENTE de credencias.env (sem senha padrao no codigo).
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB}
+    username: ${POSTGRES_USER}
+    password: ${POSTGRES_PASSWORD}
     hikari:
-      maximum-pool-size: 20
-      connection-timeout: 3000
+      maximum-pool-size: ${SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE:20}
+      connection-timeout: ${SPRING_DATASOURCE_HIKARI_CONNECTION_TIMEOUT:3000}
   flyway:
     enabled: true
   lifecycle:
@@ -18,17 +23,17 @@ spring:
 
 booking:
   reservation:
-    ttl: 10m
-    max-quantity: 10
-    expiration-job-enabled: true
-    expiration-job-delay: 5s
-    expiration-batch-size: 100
+    ttl: ${BOOKING_RESERVATION_TTL:10m}
+    max-quantity: ${BOOKING_RESERVATION_MAX_QUANTITY:10}
+    expiration-job-enabled: ${BOOKING_RESERVATION_EXPIRATION_JOB_ENABLED:true}
+    expiration-job-delay: ${BOOKING_RESERVATION_EXPIRATION_JOB_DELAY:5s}
+    expiration-batch-size: ${BOOKING_RESERVATION_EXPIRATION_BATCH_SIZE:100}
   availability-cache:
-    enabled: true
-    ttl: 1s
+    enabled: ${BOOKING_AVAILABILITY_CACHE_ENABLED:true}
+    ttl: ${BOOKING_AVAILABILITY_CACHE_TTL:1s}
   db:
-    lock-timeout: 1s
-    statement-timeout: 3s
+    lock-timeout: ${BOOKING_DB_LOCK_TIMEOUT:1s}
+    statement-timeout: ${BOOKING_DB_STATEMENT_TIMEOUT:3s}
 
 management:
   endpoints:
@@ -39,3 +44,13 @@ management:
 logging:
   pattern:
     level: "%5p [%X{correlationId:-}]"
+
+# Persistencia: MyBatis com SQL explicito em XML (src/main/resources/mapper)
+mybatis:
+  mapper-locations: classpath:mapper/*.xml
+  configuration:
+    map-underscore-to-camel-case: true
+    # sem cache de 1o nivel entre statements: evita resultado velho dentro da mesma transacao
+    # (ex.: SELECT ... FOR UPDATE / UPDATE ... RETURNING repetidos)
+    local-cache-scope: statement
+  type-handlers-package: com.flashbooking.infra.typehandler

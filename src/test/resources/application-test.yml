@@ -1,3 +1,11 @@
+spring:
+  # Valores ficticios: o banco real de teste vem do Testcontainers (@ServiceConnection).
+  # Evita depender do credencias.env (ignorado no git) para rodar a suite.
+  datasource:
+    url: jdbc:postgresql://localhost:5432/test
+    username: test
+    password: test
+
 booking:
   reservation:
     expiration-job-enabled: false

@@ -96,6 +96,16 @@ stateDiagram-v2
 
 Pré-requisito: Docker (com Docker Compose).
 
+**1. Crie o arquivo de credenciais.** Todas as senhas e variáveis ficam em `credencias.env`, que **não é versionado** (está no `.gitignore`). O repositório traz o modelo `credencias.env.example`:
+
+```bash
+cp credencias.env.example credencias.env
+```
+
+Edite `credencias.env` e troque `POSTGRES_PASSWORD` por uma senha sua. Sem esse arquivo, o `docker compose` falha com "env file not found".
+
+**2. Suba a stack:**
+
 ```bash
 docker compose up --build
 ```
@@ -424,14 +434,35 @@ Propriedades `booking.*` (`application.yml`; valores padrão coincidem com os do
 
 Outras propriedades relevantes: `spring.datasource.hikari.maximum-pool-size=20`, `spring.datasource.hikari.connection-timeout=3000`, `server.shutdown=graceful` (com `spring.lifecycle.timeout-per-shutdown-phase=20s`) e exposição do Actuator limitada a `health,info,metrics`.
 
-Variáveis de ambiente:
+### Credenciais e variáveis de ambiente (`credencias.env`)
+
+Fonte única de credenciais e ajustes. Não há senha padrão no código: a aplicação exige `POSTGRES_USER`, `POSTGRES_PASSWORD` e `POSTGRES_DB` e não sobe sem eles. O mesmo arquivo alimenta:
+
+- o **Docker Compose** (`env_file: credencias.env` no `postgres`, `api1` e `api2`);
+- a **aplicação rodando fora do Docker**, via `spring.config.import` (`optional:file:./credencias.env[.properties]`); nesse caso use `POSTGRES_HOST=localhost`;
+- os **testes**, que não dependem dele: usam um PostgreSQL do Testcontainers com credenciais próprias.
 
 | Variável | Padrão | Descrição |
 |---|---|---|
-| `INSTANCE_ID` | `local` | Valor do header `X-Instance-Id` e do campo `instance_id` no histórico (`api1`/`api2` no Compose) |
-| `SPRING_DATASOURCE_URL` | `jdbc:postgresql://localhost:5432/flashbooking` | URL JDBC |
-| `SPRING_DATASOURCE_USERNAME` | `flashbooking` | Usuário |
-| `SPRING_DATASOURCE_PASSWORD` | `flashbooking` | Senha |
+| `POSTGRES_DB` | (obrigatória) | Nome do banco |
+| `POSTGRES_USER` | (obrigatória) | Usuário |
+| `POSTGRES_PASSWORD` | (obrigatória) | Senha |
+| `POSTGRES_HOST` | `localhost` | Host do banco visto pela aplicação (`postgres` no Compose) |
+| `POSTGRES_PORT` | `5432` | Porta |
+| `SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE` | `20` | Tamanho do pool por instância |
+| `SPRING_DATASOURCE_HIKARI_CONNECTION_TIMEOUT` | `3000` | Timeout (ms) para obter conexão; estourar vira 503 |
+| `BOOKING_RESERVATION_TTL`, `BOOKING_RESERVATION_MAX_QUANTITY`, `BOOKING_RESERVATION_EXPIRATION_JOB_ENABLED`, `BOOKING_RESERVATION_EXPIRATION_JOB_DELAY`, `BOOKING_RESERVATION_EXPIRATION_BATCH_SIZE`, `BOOKING_AVAILABILITY_CACHE_ENABLED`, `BOOKING_AVAILABILITY_CACHE_TTL`, `BOOKING_DB_LOCK_TIMEOUT`, `BOOKING_DB_STATEMENT_TIMEOUT` | iguais à tabela acima | Sobrescrevem as propriedades `booking.*` |
+| `INSTANCE_ID` | `local` | Definida no `docker-compose.yml` (não é segredo): `api1`/`api2`; valor do header `X-Instance-Id` e do `instance_id` no histórico |
+
+**Trocar a senha com o banco já criado:** o Postgres só aplica `POSTGRES_PASSWORD` na primeira inicialização do volume. Se você mudar a senha no `credencias.env` depois, atualize-a também no banco (sem perder dados):
+
+```bash
+docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v pw="$POSTGRES_PASSWORD"' <<'SQL'
+ALTER USER flashbooking PASSWORD :'pw';
+SQL
+```
+
+(ou recrie o volume com `docker compose down -v`, o que apaga os dados.) Depois reinicie as APIs: `docker compose up -d`.
 
 O `Dockerfile` é multi-stage (`maven:3.9-eclipse-temurin-21` para o build com `-DskipTests`, `eclipse-temurin:21-jre` no runtime, usuário não root, `-XX:MaxRAMPercentage=75`).
 

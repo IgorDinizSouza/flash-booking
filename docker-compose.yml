@@ -1,14 +1,12 @@
+# Todas as credenciais e variaveis vem de credencias.env (copie de credencias.env.example).
 services:
   postgres:
     image: postgres:16
-    environment:
-      POSTGRES_DB: flashbooking
-      POSTGRES_USER: flashbooking
-      POSTGRES_PASSWORD: flashbooking
+    env_file: credencias.env   # POSTGRES_DB, POSTGRES_USER, POSTGRES_PASSWORD
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U flashbooking -d flashbooking"]
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -16,11 +14,9 @@ services:
 
   api1:
     build: .
+    env_file: credencias.env
     environment: &api-env
       INSTANCE_ID: api1
-      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/flashbooking
-      SPRING_DATASOURCE_USERNAME: flashbooking
-      SPRING_DATASOURCE_PASSWORD: flashbooking
     depends_on:
       postgres:
         condition: service_healthy
@@ -36,6 +32,7 @@ services:
 
   api2:
     build: .
+    env_file: credencias.env
     environment:
       <<: *api-env
       INSTANCE_ID: api2
