@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.sql.SQLException;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.dao.DeadlockLoserDataAccessException;
 import org.springframework.transaction.TransactionSystemException;
 
@@ -25,6 +27,20 @@ class DatabaseBusyMappingTest {
                 .isTrue();
         assertThat(GlobalExceptionHandler.isDatabaseBusy(new RuntimeException(new SQLException("s", "57014"))))
                 .isTrue();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = { "57P01", "57P02", "57P03", "08000", "08001", "08003", "08004", "08006", "08007" })
+    void shutdownAndConnectionFailureSqlStatesAreBusy(String sqlState) {
+        var wrapped = new TransactionSystemException("x", new RuntimeException(new SQLException("down", sqlState)));
+        assertThat(GlobalExceptionHandler.isDatabaseBusy(wrapped)).isTrue();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = { "23505", "22001", "42P01", "57000", "0A000", "40001" })
+    void unrelatedSqlStatesAreStillNotBusy(String sqlState) {
+        assertThat(GlobalExceptionHandler.isDatabaseBusy(new RuntimeException(new SQLException("u", sqlState))))
+                .isFalse();
     }
 
     @Test

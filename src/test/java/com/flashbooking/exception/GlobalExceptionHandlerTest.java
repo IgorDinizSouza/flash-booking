@@ -59,6 +59,12 @@ class GlobalExceptionHandlerTest extends AbstractIntegrationTest {
                         new SQLException("canceling statement due to lock timeout", "55P03"));
             }
 
+            @GetMapping("/test/admin-shutdown")
+            void adminShutdown() {
+                throw new UncategorizedSQLException("task", "sql",
+                        new SQLException("terminating connection due to administrator command", "57P01"));
+            }
+
             @GetMapping("/test/boom")
             void boom() {
                 throw new IllegalStateException("secret internal detail");
@@ -137,5 +143,13 @@ class GlobalExceptionHandlerTest extends AbstractIntegrationTest {
         assertThat(res.getStatusCode()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
         assertThat(res.getBody().get("code").asText()).isEqualTo("INTERNAL_ERROR");
         assertThat(res.getBody().toString()).doesNotContain("secret internal detail").doesNotContain("trace");
+    }
+
+    @Test
+    void adminShutdownSqlStateBecomes503WithRetryAfter() {
+        var res = get("/test/admin-shutdown", null);
+        assertThat(res.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+        assertThat(res.getHeaders().getFirst("Retry-After")).isEqualTo("1");
+        assertThat(res.getBody().get("code").asText()).isEqualTo("DATABASE_BUSY");
     }
 }

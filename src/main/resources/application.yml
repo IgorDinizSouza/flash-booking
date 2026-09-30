@@ -18,6 +18,12 @@ spring:
       connection-timeout: ${SPRING_DATASOURCE_HIKARI_CONNECTION_TIMEOUT:3000}
   flyway:
     enabled: true
+  jackson:
+    # quantity/capacity sao inteiros: 2.5, 2.0 e "2" viram 400 MALFORMED_REQUEST (sem coercao silenciosa)
+    mapper:
+      allow-coercion-of-scalars: false
+    deserialization:
+      accept-float-as-int: false
   lifecycle:
     timeout-per-shutdown-phase: 20s
 

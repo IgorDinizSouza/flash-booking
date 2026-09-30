@@ -2,6 +2,7 @@ package com.flashbooking.filter;
 
 import java.io.IOException;
 import java.util.UUID;
+import java.util.regex.Pattern;
 
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -20,13 +21,14 @@ public class CorrelationIdFilter extends OncePerRequestFilter {
 
     public static final String HEADER = "X-Correlation-Id";
     public static final String MDC_KEY = "correlationId";
-    private static final int MAX_LENGTH = 64; // coluna reservation_history.correlation_id e VARCHAR(64)
+    // coluna reservation_history.correlation_id e VARCHAR(64); so caracteres seguros (evita log injection)
+    private static final Pattern SAFE_ID = Pattern.compile("[A-Za-z0-9._-]{1,64}");
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
         String id = request.getHeader(HEADER);
-        if (id == null || id.isBlank() || id.length() > MAX_LENGTH) {
+        if (id == null || !SAFE_ID.matcher(id).matches()) {
             id = UUID.randomUUID().toString();
         }
         MDC.put(MDC_KEY, id);

@@ -2,6 +2,7 @@
 services:
   postgres:
     image: postgres:16
+    restart: unless-stopped
     env_file: credencias.env   # POSTGRES_DB, POSTGRES_USER, POSTGRES_PASSWORD
     volumes:
       - pgdata:/var/lib/postgresql/data
@@ -14,6 +15,9 @@ services:
 
   api1:
     build: .
+    restart: unless-stopped
+    # >= spring.lifecycle.timeout-per-shutdown-phase (20s): o SIGKILL do Compose (padrao 10s) nao corta o graceful shutdown
+    stop_grace_period: 30s
     env_file: credencias.env
     environment: &api-env
       INSTANCE_ID: api1
@@ -32,6 +36,8 @@ services:
 
   api2:
     build: .
+    restart: unless-stopped
+    stop_grace_period: 30s
     env_file: credencias.env
     environment:
       <<: *api-env
@@ -46,6 +52,7 @@ services:
 
   nginx:
     image: nginx:stable-alpine
+    restart: unless-stopped
     ports:
       - "8080:80"
     volumes:

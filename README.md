@@ -110,7 +110,7 @@ Edite `credencias.env` e troque `POSTGRES_PASSWORD` por uma senha sua. Sem esse 
 docker compose up --build
 ```
 
-Sobe `postgres` (com healthcheck), `api1` e `api2` (mesma imagem, `INSTANCE_ID` diferente, migrations Flyway automáticas) e `nginx` (porta 8080). As APIs só sobem depois que o Postgres está saudável; o nginx só depois que ambas estão saudáveis.
+Sobe `postgres` (com healthcheck), `api1` e `api2` (mesma imagem, `INSTANCE_ID` diferente, migrations Flyway automáticas) e `nginx` (porta 8080). As APIs só sobem depois que o Postgres está saudável; o nginx só depois que ambas estão saudáveis. Todos os serviços têm `restart: unless-stopped`; `api1`/`api2` têm `stop_grace_period: 30s` (maior que o `timeout-per-shutdown-phase` de 20s do graceful shutdown). A aplicação **falha na subida** se `INSTANCE_ID` tiver mais de 30 caracteres ou caracteres fora de `[A-Za-z0-9._-]` (a coluna `reservation_history.instance_id` é `VARCHAR(30)`). O nginx reresolve o DNS dos upstreams a cada 5s, então `docker compose up -d --force-recreate api1` não exige reiniciar o nginx.
 
 | Recurso | URL |
 |---|---|
@@ -204,8 +204,10 @@ docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD":/workspac
 | `EventApiTest`, `EventCacheTest` | Contrato e validações de eventos, headers de correlação e instância; o cache serve o valor antigo dentro do TTL e converge depois dele |
 | `MultiInstanceConcurrencyTest` | **Duas aplicações completas** (`api1` e `api2`, portas distintas) contra o mesmo PostgreSQL: subida simultânea com o lock de migração do Flyway; 200 requisições alternadas entre as instâncias disputando 50 ingressos (50 x 201, 150 x 409, `available = 0`); idempotência entre instâncias; jobs de expiração das duas instâncias em paralelo com cancelamentos via HTTP |
 | `DatabaseBusyTest`, `DatabaseStatementTimeoutTest`, `DatabasePoolExhaustedTest` | **503 `DATABASE_BUSY` com `Retry-After: 1`** provocado de verdade: linha do evento ou da reserva travada por outra conexão (lock timeout), chave de idempotência disputada, `statement_timeout` e pool de conexões esgotado. Nenhum estado parcial fica para trás e o retry com a mesma chave funciona depois; a resposta não vaza SQL nem stack trace |
-| `DatabaseBusyMappingTest` | Mapeamento de `40P01` (deadlock), `55P03` e `57014` para 503, inclusive encadeados sob exceções do Spring; SQLStates não relacionados não viram 503 |
+| `DatabaseBusyMappingTest` | Mapeamento de `40P01` (deadlock), `55P03`, `57014`, `57P01`/`57P02`/`57P03` e classe `08` para 503, inclusive encadeados sob exceções do Spring; SQLStates não relacionados não viram 503 |
 | `GlobalExceptionHandlerTest` | Mapeamento de exceções para `ProblemDetail` com `code` e `correlationId`; erro inesperado vira 500 sem vazar detalhes |
+| `ApiHardeningTest` | 404/405/406/415 como `ProblemDetail`; `quantity`/`capacity` decimais ou texto rejeitados; hash de idempotência determinístico; replay congelado após cancelamento/expiração; regras do `name` (controle/NUL, code points após `trim`, emoji e acentos); validação do `X-Correlation-Id` |
+| `InstanceIdStartupValidationTest` | `INSTANCE_ID` inválido (mais de 30 caracteres ou fora de `[A-Za-z0-9._-]`) derruba a subida da aplicação com mensagem clara |
 | `ConstraintsTest` | Migrations Flyway aplicadas; os `CHECK`, FK e `UNIQUE` impedem estado inválido |
 
 **Invariante de estoque:** os testes de escrita verificam, via `StockInvariant`, que `total_capacity = available + SUM(quantity das reservas PENDING)` e `available >= 0`.
@@ -252,7 +254,7 @@ Idioma único: inglês (rotas, JSON, banco, enums, erros). Todas as respostas de
 { "name": "Java Festival", "capacity": 50 }
 ```
 
-Validação: `name` não vazio e com no máximo 150 caracteres; `capacity` entre 1 e 1.000.000. Resposta (também usada em `GET /events/{id}`):
+Validação: `name` não vazio, sem caracteres de controle (inclui NUL, tab e quebra de linha) e com no máximo 150 **pontos de código Unicode depois do `trim`** (um emoji conta 1; é o que vai para `VARCHAR(150)`); `capacity` inteiro entre 1 e 1.000.000. `quantity` e `capacity` **só aceitam números inteiros JSON**: `2.5`, `2.0` e `"2"` retornam `400 MALFORMED_REQUEST` (sem coerção silenciosa; `null`/ausente continuam `INVALID_QUANTITY`/`INVALID_CAPACITY`, e valores fora de `int` são `MALFORMED_REQUEST`). Resposta (também usada em `GET /events/{id}`):
 
 ```json
 { "id": "57d8...", "name": "Java Festival", "capacity": 50, "available": 50, "createdAt": "2026-09-30T14:00:00Z" }
@@ -304,7 +306,7 @@ Se a reserva está `PENDING` e `expires_at <= NOW()` (relógio do banco), a resp
 | Header | Direção | Uso |
 |---|---|---|
 | `Idempotency-Key` | request | Obrigatório em `POST /events/{id}/reservations` (1 a 150 caracteres) |
-| `X-Correlation-Id` | request e response | Aceito na entrada (até 64 caracteres) ou gerado (UUID); devolvido na resposta, presente no MDC/logs, no corpo de erro e no histórico. O nginx repassa o do cliente ou gera um a partir de `$request_id` |
+| `X-Correlation-Id` | request e response | Aceito na entrada se tiver 1 a 64 caracteres de `[A-Za-z0-9._-]` (qualquer outro valor é descartado e substituído por um UUID gerado, evitando injeção em logs); devolvido na resposta, presente no MDC/logs, no corpo de erro e no histórico. O nginx repassa o do cliente ou gera um a partir de `$request_id` |
 | `X-Instance-Id` | response | Identifica a instância que atendeu (`api1`, `api2`; `local` fora do Compose) |
 | `Idempotent-Replayed` | response | `true` quando a resposta é um replay |
 | `Retry-After` | response | `1` nos 503 `DATABASE_BUSY` |
@@ -327,9 +329,13 @@ Se a reserva está `PENDING` e `expires_at <= NOW()` (relógio do banco), a resp
 | 409 | `INVALID_RESERVATION_STATE` | Cancelar reserva `EXPIRED` ou `PENDING` já vencida |
 | 409 | `IDEMPOTENCY_KEY_CONFLICT` | Mesma chave usada com request diferente |
 | 503 | `DATABASE_BUSY` | Timeout de lock ou de statement, pool de conexões esgotado ou deadlock; vem com `Retry-After: 1` |
+| 404 | `ROUTE_NOT_FOUND` | Rota inexistente |
+| 405 | `METHOD_NOT_ALLOWED` | Método HTTP não suportado pela rota (vem com o header `Allow`) |
+| 406 | `NOT_ACCEPTABLE` | `Accept` sem `application/json` |
+| 415 | `UNSUPPORTED_MEDIA_TYPE` | `Content-Type` diferente de `application/json` |
 | 500 | `INTERNAL_ERROR` | Qualquer outro erro; a resposta não expõe stack trace |
 
-**503 `DATABASE_BUSY`:** é o contrato de falha explícita sob saturação. O handler mapeia os SQLState `55P03` (lock timeout), `57014` (statement timeout) e `40P01` (deadlock), além de `CannotGetJdbcConnectionException` e `SQLTransientConnectionException` (pool Hikari esgotado). Como o rollback desfaz tudo, reenviar a mesma requisição com a mesma `Idempotency-Key` é seguro. O mapeamento do handler é coberto por teste unitário (`GlobalExceptionHandlerTest`); não há teste de integração que force o timeout com uma transação segurando a linha.
+**503 `DATABASE_BUSY`:** é o contrato de falha explícita sob saturação. O handler mapeia os SQLState `55P03` (lock timeout), `57014` (statement timeout), `40P01` (deadlock), `57P01`/`57P02`/`57P03` (banco desligando ou reiniciando) e a classe `08` (falha de conexão), além de `CannotGetJdbcConnectionException` e `SQLTransientConnectionException` (pool Hikari esgotado). Como o rollback desfaz tudo, reenviar a mesma requisição com a mesma `Idempotency-Key` é seguro. O mapeamento dos SQLStates é coberto por `DatabaseBusyMappingTest` e `GlobalExceptionHandlerTest`; o 503 provocado de verdade (lock timeout com uma transação segurando a linha, statement timeout e pool esgotado) é coberto por `DatabaseBusyTest`, `DatabaseStatementTimeoutTest` e `DatabasePoolExhaustedTest`. Os erros HTTP do framework (404 de rota, 405, 406, 415) também saem como `ProblemDetail` com `code` e `correlationId` (`ApiHardeningTest`); o `Content-Type` do erro é sempre `application/problem+json`, independente do `Accept`.
 
 ---
 
@@ -516,8 +522,9 @@ Migrations em `src/main/resources/db/migration`: `V1__create_events`, `V2__creat
 | `reservations.rejected{reason=insufficient_capacity}` | 409 por falta de estoque |
 | `reservations.rejected{reason=idempotency_conflict}` | 409 por conflito de chave |
 | `reservations.rejected{reason=invalid_state}` | 409 ao cancelar reserva expirada/vencida |
-| `reservations.rejected{reason=db_busy}` | 503 `DATABASE_BUSY` (uma vez por resposta) |
+| `reservations.rejected{reason=db_busy}` | 503 `DATABASE_BUSY` em operações de reserva (`POST /events/{id}/reservations` e `DELETE /reservations/{id}`), uma vez por resposta; 503 de `GET` não entra |
 
+- **Métricas por instância:** cada instância tem o próprio `MeterRegistry` (sem tag de instância); via nginx, `/actuator/metrics` alterna entre `api1` e `api2`. Para somar, consulte cada instância.
 - **Actuator:** `/actuator/health` (usado pelos healthchecks do Compose), `/actuator/info`, `/actuator/metrics`.
 - **Swagger UI:** `/swagger-ui.html`, com exemplos de request/response e de `ProblemDetail`.
 
@@ -573,6 +580,10 @@ Migrations em `src/main/resources/db/migration`: `V1__create_events`, `V2__creat
 
 ### Limitações conhecidas
 
+- **Chave de idempotência global:** a chave (PK de `idempotency_keys`) não tem escopo por cliente, evento ou rota, e não há TTL. Uma chave igual usada por outro cliente para o mesmo evento e a mesma quantidade recebe o replay da reserva do primeiro. O escopo atual é assumido porque o enunciado não tem autenticação; a evolução é escopar a chave por cliente/tenant (e por rota) e limpar por TTL.
+- **Replay devolve a resposta original congelada:** repetir o `POST` com a mesma chave devolve 201 com o corpo salvo (status `PENDING` e `expiresAt` originais, `Idempotent-Replayed: true`), **mesmo depois de a reserva ser cancelada ou expirada**. É decisão de projeto, como em APIs de pagamento: o replay representa a resposta daquela chamada, não o estado atual; quem quer o estado atual usa `GET /reservations/{id}`. Não cria reserva nova nem mexe no estoque.
+- **Métricas por instância:** os contadores são locais a cada JVM; via nginx, a leitura alterna entre as instâncias.
+- **nginx reresolve os upstreams a cada 5s** (`resolver 127.0.0.11` + `server ... resolve`, exige nginx >= 1.27.3): um container recriado com IP novo volta ao balanceamento sozinho, mas por até ~15s (DNS + `fail_timeout` de 10s) parte das requisições pode receber 502/504 do nginx, em HTML e fora do contrato `ProblemDetail`.
 - **Hot row:** todas as reservas de um mesmo evento serializam no `UPDATE` da linha do evento. O impacto é mitigado (o `UPDATE` é o último passo e há `lock_timeout`), mas a vazão por evento tem teto.
 - **Cache local:** a disponibilidade em `GET /events/{id}` pode estar defasada em cerca de 1s e oscilar entre instâncias.
 - **`idempotency_keys` sem TTL nem limpeza:** a tabela cresce indefinidamente; as chaves valem para sempre.

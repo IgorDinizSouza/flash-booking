@@ -228,7 +228,7 @@ Todas as respostas de erro usam `ProblemDetail` (RFC 7807) com as propriedades e
 { "id": "57d8...", "name": "Java Festival", "capacity": 50, "available": 50, "createdAt": "2026-09-30T14:00:00Z" }
 ```
 
-Validação: `name` não vazio, ≤150; `capacity` entre 1 e 1.000.000.
+Validação: `name` não vazio, sem caracteres de controle, ≤150 pontos de código após `trim`; `capacity` inteiro entre 1 e 1.000.000 (decimais e texto → `MALFORMED_REQUEST`).
 
 ### GET /events/{id} → 200
 
@@ -246,8 +246,8 @@ Header obrigatório `Idempotency-Key` (1–150 caracteres).
   "expiresAt": "2026-09-30T14:10:00Z", "createdAt": "2026-09-30T14:00:00Z" }
 ```
 
-- `quantity` entre 1 e `booking.reservation.max-quantity` (padrão 10).
-- Repetição com a mesma chave e o mesmo request → **mesma resposta** (mesmo status e corpo) + header `Idempotent-Replayed: true`.
+- `quantity` inteiro entre 1 e `booking.reservation.max-quantity` (padrão 10); `2.5`, `2.0` e `"2"` → `MALFORMED_REQUEST`.
+- Repetição com a mesma chave e o mesmo request → **mesma resposta** (mesmo status e corpo) + header `Idempotent-Replayed: true`. O replay devolve a resposta original congelada, mesmo depois de a reserva ser cancelada/expirada (decisão de projeto). A chave é global (sem escopo por cliente, sem TTL): limitação conhecida.
 
 ### GET /reservations/{id} → 200
 
@@ -266,7 +266,7 @@ Mesmo modelo da reserva. **Status efetivo:** se `PENDING` e `expires_at <= NOW()
 
 | Header | Uso |
 |---|---|
-| `X-Correlation-Id` | aceito na entrada ou gerado; devolvido; vai para o MDC e para o erro |
+| `X-Correlation-Id` | aceito na entrada (1 a 64 caracteres de `[A-Za-z0-9._-]`) ou gerado; devolvido; vai para o MDC e para o erro |
 | `X-Instance-Id` | resposta: identifica `api1`/`api2` (prova de balanceamento) |
 | `Idempotent-Replayed` | `true` em replay |
 | `Retry-After: 1` | nos 503 |
@@ -288,7 +288,11 @@ Mesmo modelo da reserva. **Status efetivo:** se `PENDING` e `expires_at <= NOW()
 | 409 | `INSUFFICIENT_CAPACITY` | sem estoque |
 | 409 | `INVALID_RESERVATION_STATE` | cancelar reserva expirada |
 | 409 | `IDEMPOTENCY_KEY_CONFLICT` | mesma chave, request diferente |
-| 503 | `DATABASE_BUSY` | timeout de lock/statement, pool esgotado, deadlock |
+| 503 | `DATABASE_BUSY` | timeout de lock/statement, pool esgotado, deadlock, banco reiniciando (`57P01..03`) ou falha de conexão (classe `08`) |
+| 404 | `ROUTE_NOT_FOUND` | rota inexistente |
+| 405 | `METHOD_NOT_ALLOWED` | método não suportado (header `Allow`) |
+| 406 | `NOT_ACCEPTABLE` | `Accept` sem `application/json` |
+| 415 | `UNSUPPORTED_MEDIA_TYPE` | `Content-Type` diferente de `application/json` |
 | 500 | `INTERNAL_ERROR` | qualquer outro erro (sem stack trace na resposta) |
 
 ---
@@ -435,8 +439,8 @@ Cada instância: `INSTANCE_ID=api1|api2` (env) → header `X-Instance-Id`.
 | Serviço | Detalhe |
 |---|---|
 | `postgres` | `postgres:16`, volume, `healthcheck` (`pg_isready`) |
-| `api1`, `api2` | mesma imagem, `INSTANCE_ID` diferente, `depends_on: postgres: service_healthy`, healthcheck em `/actuator/health` |
-| `nginx` | `8080:80`, upstream `api1:8080` + `api2:8080`, round-robin, repassa `X-Correlation-Id`, `proxy_next_upstream off` para POST |
+| `api1`, `api2` | mesma imagem, `INSTANCE_ID` diferente (1 a 30 caracteres `[A-Za-z0-9._-]`, validado na subida), `depends_on: postgres: service_healthy`, healthcheck em `/actuator/health`, `stop_grace_period: 30s` (maior que o graceful shutdown de 20s), `restart: unless-stopped` |
+| `nginx` | `8080:80`, upstream `api1:8080` + `api2:8080` (`resolver 127.0.0.11 valid=5s` + `resolve`: reresolve o DNS do Docker), round-robin, repassa `X-Correlation-Id`, `proxy_next_upstream off` para POST |
 | `k6` | `grafana/k6`, `profiles: ["load"]`, script montado de `./k6` |
 
 Comandos:
@@ -497,9 +501,9 @@ Thresholds: `http_req_failed` só conta 5xx inesperados (503 tratados por retry)
 ## 9. Observabilidade
 
 - **Correlation ID:** `CorrelationIdFilter` (MDC) → todo log e todo erro carrega o id.
-  Logs-chave: `reservation requested`, `capacity acquired`, `reservation created`, `commit completed`, `expired batch n=..`.
+  Logs-chave: `reservation requested`, `capacity acquired`, `commit completed`, `reservation cancelled`, `idempotent replay`, `expired batch n=..`.
 - **Actuator:** `/actuator/health` (usado pelos healthchecks), `/actuator/metrics`.
-- **Métricas (Micrometer):** `reservations.created`, `reservations.cancelled`, `reservations.expired`, `reservations.rejected{reason=insufficient_capacity|idempotency_conflict|db_busy}`.
+- **Métricas (Micrometer):** `reservations.created`, `reservations.cancelled`, `reservations.expired`, `reservations.rejected{reason=insufficient_capacity|idempotency_conflict|invalid_state|db_busy}` (`db_busy` só em POST/DELETE de reserva; métricas são por instância).
 - **Swagger UI:** `/swagger-ui.html`, com exemplos de request/response e do `ProblemDetail`.
 - **`requests.http`** (ou coleção Postman) com o roteiro de demonstração.
 
