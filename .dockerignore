@@ -1,0 +1,15 @@
+.git
+.gitignore
+.idea
+.vscode
+*.iml
+target
+docs
+k6
+docker
+PLANO.md
+README.md
+requests.http
+docker-compose.yml
+Dockerfile
+.dockerignore

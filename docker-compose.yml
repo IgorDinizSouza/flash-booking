@@ -1,0 +1,73 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: flashbooking
+      POSTGRES_USER: flashbooking
+      POSTGRES_PASSWORD: flashbooking
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U flashbooking -d flashbooking"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  api1:
+    build: .
+    environment: &api-env
+      INSTANCE_ID: api1
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/flashbooking
+      SPRING_DATASOURCE_USERNAME: flashbooking
+      SPRING_DATASOURCE_PASSWORD: flashbooking
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck: &api-health
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/actuator/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 40s
+    # Debug opcional (acesso direto a instancia, sem nginx):
+    # ports:
+    #   - "8081:8080"
+
+  api2:
+    build: .
+    environment:
+      <<: *api-env
+      INSTANCE_ID: api2
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck: *api-health
+    # Debug opcional (acesso direto a instancia, sem nginx):
+    # ports:
+    #   - "8082:8080"
+
+  nginx:
+    image: nginx:stable-alpine
+    ports:
+      - "8080:80"
+    volumes:
+      - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      api1:
+        condition: service_healthy
+      api2:
+        condition: service_healthy
+
+  k6:
+    image: grafana/k6
+    profiles: ["load"]
+    environment:
+      BASE_URL: http://nginx:80
+    volumes:
+      - ./k6:/scripts:ro
+    depends_on:
+      - nginx
+
+volumes:
+  pgdata:

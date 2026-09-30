@@ -1,0 +1,84 @@
+### Flash Booking - roteiro de demonstracao
+### Compativel com JetBrains HTTP Client e VS Code REST Client.
+### Execute os requests em ordem.
+
+@baseUrl = http://localhost:8080
+@idemKey = demo-key-001
+
+### 1. Criar evento
+# @name createEvent
+POST {{baseUrl}}/events
+Content-Type: application/json
+
+{ "name": "Java Festival", "capacity": 50 }
+
+###
+@eventId = {{createEvent.response.body.$.id}}
+
+### 2. Consultar evento (disponibilidade pode estar defasada ~1s por causa do cache)
+GET {{baseUrl}}/events/{{eventId}}
+
+### 3. Reservar (Idempotency-Key obrigatoria) -> 201 + Location
+# @name createReservation
+POST {{baseUrl}}/events/{{eventId}}/reservations
+Content-Type: application/json
+Idempotency-Key: {{idemKey}}
+
+{ "quantity": 2 }
+
+###
+@reservationId = {{createReservation.response.body.$.id}}
+
+### 4. Repetir a mesma chave e o mesmo body -> mesma resposta + Idempotent-Replayed: true
+POST {{baseUrl}}/events/{{eventId}}/reservations
+Content-Type: application/json
+Idempotency-Key: {{idemKey}}
+
+{ "quantity": 2 }
+
+### 5. Mesma chave com quantity diferente -> 409 IDEMPOTENCY_KEY_CONFLICT
+POST {{baseUrl}}/events/{{eventId}}/reservations
+Content-Type: application/json
+Idempotency-Key: {{idemKey}}
+
+{ "quantity": 3 }
+
+### 6. Consultar reserva -> PENDING (ou EXPIRED apos o TTL)
+GET {{baseUrl}}/reservations/{{reservationId}}
+
+### 7. Cancelar reserva -> 204 (devolve o estoque)
+DELETE {{baseUrl}}/reservations/{{reservationId}}
+
+### 8. Cancelar de novo -> 204 (idempotente, nao devolve estoque outra vez)
+DELETE {{baseUrl}}/reservations/{{reservationId}}
+
+### 9. Consultar evento (pode levar ~1s para refletir, cache local por instancia)
+GET {{baseUrl}}/events/{{eventId}}
+
+### 10. Erro de validacao: quantity invalida -> 400 INVALID_QUANTITY
+POST {{baseUrl}}/events/{{eventId}}/reservations
+Content-Type: application/json
+Idempotency-Key: demo-key-invalid
+
+{ "quantity": 0 }
+
+### 11. Erro de validacao: sem Idempotency-Key -> 400 MISSING_IDEMPOTENCY_KEY
+POST {{baseUrl}}/events/{{eventId}}/reservations
+Content-Type: application/json
+
+{ "quantity": 1 }
+
+### 12. Erro de validacao: capacity invalida -> 400 INVALID_CAPACITY
+POST {{baseUrl}}/events
+Content-Type: application/json
+
+{ "name": "Evento invalido", "capacity": 0 }
+
+### 13. Evento inexistente -> 404 EVENT_NOT_FOUND
+GET {{baseUrl}}/events/00000000-0000-0000-0000-000000000000
+
+### 14. Health check
+GET {{baseUrl}}/actuator/health
+
+### 15. Metricas
+GET {{baseUrl}}/actuator/metrics/reservations.created
