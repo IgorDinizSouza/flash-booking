@@ -3,6 +3,7 @@ package com.flashbooking.exception;
 import java.net.URI;
 import java.sql.SQLException;
 import java.sql.SQLTransientConnectionException;
+import java.util.Comparator;
 import java.util.Set;
 import java.util.UUID;
 
@@ -19,6 +20,7 @@ import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.jdbc.CannotGetJdbcConnectionException;
+import org.springframework.validation.FieldError;
 import org.springframework.web.HttpMediaTypeNotAcceptableException;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
@@ -59,7 +61,12 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ProblemDetail> handleBodyValidation(MethodArgumentNotValidException ex,
             HttpServletRequest req) {
-        var fieldError = ex.getBindingResult().getFieldError();
+        // O Spring nao garante a ordem dos erros de validacao; com varios campos invalidos a mesma
+        // requisicao poderia devolver codes diferentes. Escolha deterministica: ordem alfabetica do campo.
+        var fieldError = ex.getBindingResult().getFieldErrors().stream()
+                .min(Comparator.comparing(FieldError::getField)
+                        .thenComparing(fe -> String.valueOf(fe.getDefaultMessage())))
+                .orElse(null);
         String field = fieldError != null ? fieldError.getField() : null;
         String message = fieldError != null ? fieldError.getDefaultMessage() : null;
         return build(codeForInvalidField(field), message, req);
@@ -68,7 +75,10 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(ConstraintViolationException.class)
     public ResponseEntity<ProblemDetail> handleConstraintViolation(ConstraintViolationException ex,
             HttpServletRequest req) {
-        var violation = ex.getConstraintViolations().stream().findFirst().orElse(null);
+        var violation = ex.getConstraintViolations().stream()
+                .min(Comparator.comparing((jakarta.validation.ConstraintViolation<?> v) -> v.getPropertyPath().toString())
+                        .thenComparing(v -> String.valueOf(v.getMessage())))
+                .orElse(null);
         String path = violation != null ? violation.getPropertyPath().toString() : null;
         String message = violation != null ? violation.getMessage() : null;
         return build(codeForInvalidField(path), message, req);

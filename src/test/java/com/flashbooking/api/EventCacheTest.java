@@ -48,4 +48,26 @@ class EventCacheTest extends AbstractIntegrationTest {
         await().atMost(Duration.ofSeconds(15)).pollInterval(Duration.ofMillis(250))
                 .untilAsserted(() -> assertThat(availableOf(id)).isEqualTo(40));
     }
+
+    @Test
+    @org.junit.jupiter.api.DisplayName("EVT-29 GET apos reserva pela mesma instancia: valor antigo dentro do TTL (sem evict), converge depois")
+    void availabilityAfterReservationViaApiIsStaleWithinTtlThenConverges() {
+        JsonNode created = rest.postForObject("/events",
+                Map.of("name", "CacheRes " + UUID.randomUUID(), "capacity", 10), JsonNode.class);
+        String id = created.get("id").asText();
+        assertThat(availableOf(id)).isEqualTo(10); // popula o cache
+
+        var headers = new org.springframework.http.HttpHeaders();
+        headers.setContentType(org.springframework.http.MediaType.APPLICATION_JSON);
+        headers.set("Idempotency-Key", "k-" + UUID.randomUUID());
+        var res = rest.exchange("/events/" + id + "/reservations", org.springframework.http.HttpMethod.POST,
+                new org.springframework.http.HttpEntity<>("{\"quantity\":4}", headers), JsonNode.class);
+        assertThat(res.getStatusCode().value()).isEqualTo(201);
+        assertThat(jdbc.sql("SELECT available FROM events WHERE id = :id").param("id", UUID.fromString(id))
+                .query(Integer.class).single()).isEqualTo(6);
+
+        assertThat(availableOf(id)).as("dentro do TTL o cache nao e invalidado pela reserva").isEqualTo(10);
+        await().atMost(Duration.ofSeconds(15)).pollInterval(Duration.ofMillis(250))
+                .untilAsserted(() -> assertThat(availableOf(id)).isEqualTo(6));
+    }
 }

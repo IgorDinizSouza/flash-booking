@@ -208,6 +208,11 @@ docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD":/workspac
 | `GlobalExceptionHandlerTest` | Mapeamento de exceções para `ProblemDetail` com `code` e `correlationId`; erro inesperado vira 500 sem vazar detalhes |
 | `ApiHardeningTest` | 404/405/406/415 como `ProblemDetail`; `quantity`/`capacity` decimais ou texto rejeitados; hash de idempotência determinístico; replay congelado após cancelamento/expiração; regras do `name` (controle/NUL, code points após `trim`, emoji e acentos); validação do `X-Correlation-Id` |
 | `InstanceIdStartupValidationTest` | `INSTANCE_ID` inválido (mais de 30 caracteres ou fora de `[A-Za-z0-9._-]`) derruba a subida da aplicação com mensagem clara |
+| `EventValidationTest`, `ReservationValidationTest`, `ApiContractTest`, `ApiHardeningTest` | Limites e validações de entrada (capacity, name, quantity, `Idempotency-Key`), coerção numérica rejeitada, 404/405/406/415 como `ProblemDetail`, code estável com vários campos inválidos |
+| `IdempotencyLifecycleTest`, `ReservationLifecycleGapsTest`, `ReservationRaceTest` | Replay após cancelar/expirar (resposta original congelada), canonicalização do hash, reservar e cancelar concorrentes |
+| `MetricsTest`, `ActuatorOpenApiTest`, `InternalErrorMaskingTest`, `AppendOnlyHistoryTest` | Métricas `reservations.*` só no commit efetivo, Actuator sem endpoints sensíveis, OpenAPI coerente com o contrato, 500 sem vazar detalhes, histórico append-only |
+| `ExpirationJobResilienceTest`, `ExpirationJobBacklogTest`, `ExpirationRestartTest`, `MultiInstanceCacheTest` | Job que sobrevive a falhas, fila grande, reinício com reservas vencidas, cache divergente entre duas instâncias |
+| `SecurityRobustnessTest`, `ArchitectureRulesTest` | Corpo/header gigantes, JSON profundo, SQL injection tratada como texto; regras de arquitetura por camadas |
 | `ConstraintsTest` | Migrations Flyway aplicadas; os `CHECK`, FK e `UNIQUE` impedem estado inválido |
 
 **Invariante de estoque:** os testes de escrita verificam, via `StockInvariant`, que `total_capacity = available + SUM(quantity das reservas PENDING)` e `available >= 0`.
@@ -445,7 +450,7 @@ Outras propriedades relevantes: `spring.datasource.hikari.maximum-pool-size=20`,
 Fonte única de credenciais e ajustes. Não há senha padrão no código: a aplicação exige `POSTGRES_USER`, `POSTGRES_PASSWORD` e `POSTGRES_DB` e não sobe sem eles. O mesmo arquivo alimenta:
 
 - o **Docker Compose** (`env_file: credencias.env` no `postgres`, `api1` e `api2`);
-- a **aplicação rodando fora do Docker**, via `spring.config.import` (`optional:file:./credencias.env[.properties]`); o arquivo traz `POSTGRES_HOST=localhost` e `POSTGRES_PORT=5433` (o Compose publica o banco em `127.0.0.1:5433`); basta `docker compose up -d postgres` e rodar `FlashBookingApplication` (Java 21) a partir da raiz do projeto, sem configurar variáveis na IDE;
+- a **aplicação rodando fora do Docker**, via `spring.config.import` (`optional:file:./credencias.env[.properties]`); o arquivo traz `POSTGRES_HOST=localhost` e `POSTGRES_PORT=5433` (o Compose publica o banco em `127.0.0.1:5433`); basta `docker compose up -d postgres` e rodar `FlashBookingApplication` (Java 21) a partir da raiz do projeto, sem configurar variáveis na IDE; nesse modo a API sobe em `http://localhost:9090` (`SERVER_PORT`), então pode rodar junto com a stack do Compose, que usa a 8080;
 - os **testes**, que não dependem dele: usam um PostgreSQL do Testcontainers com credenciais próprias.
 
 | Variável | Padrão | Descrição |
@@ -455,6 +460,7 @@ Fonte única de credenciais e ajustes. Não há senha padrão no código: a apli
 | `POSTGRES_PASSWORD` | (obrigatória) | Senha |
 | `POSTGRES_HOST` | `localhost` | Host do banco visto de fora do Docker (IDE); dentro do Compose o `docker-compose.yml` o sobrescreve para `postgres` |
 | `POSTGRES_PORT` | `5432` | Porta (o `credencias.env` usa `5433`, a porta publicada no host; no Compose é sobrescrita para `5432`) |
+| `SERVER_PORT` | `8080` | Porta HTTP da API. O `credencias.env` usa `9090` para rodar na IDE sem colidir com o nginx; no Compose é fixada em `8080` |
 | `SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE` | `20` | Tamanho do pool por instância |
 | `SPRING_DATASOURCE_HIKARI_CONNECTION_TIMEOUT` | `3000` | Timeout (ms) para obter conexão; estourar vira 503 |
 | `BOOKING_RESERVATION_TTL`, `BOOKING_RESERVATION_MAX_QUANTITY`, `BOOKING_RESERVATION_EXPIRATION_JOB_ENABLED`, `BOOKING_RESERVATION_EXPIRATION_JOB_DELAY`, `BOOKING_RESERVATION_EXPIRATION_BATCH_SIZE`, `BOOKING_AVAILABILITY_CACHE_ENABLED`, `BOOKING_AVAILABILITY_CACHE_TTL`, `BOOKING_DB_LOCK_TIMEOUT`, `BOOKING_DB_STATEMENT_TIMEOUT` | iguais à tabela acima | Sobrescrevem as propriedades `booking.*` |
