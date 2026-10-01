@@ -445,7 +445,7 @@ Outras propriedades relevantes: `spring.datasource.hikari.maximum-pool-size=20`,
 Fonte única de credenciais e ajustes. Não há senha padrão no código: a aplicação exige `POSTGRES_USER`, `POSTGRES_PASSWORD` e `POSTGRES_DB` e não sobe sem eles. O mesmo arquivo alimenta:
 
 - o **Docker Compose** (`env_file: credencias.env` no `postgres`, `api1` e `api2`);
-- a **aplicação rodando fora do Docker**, via `spring.config.import` (`optional:file:./credencias.env[.properties]`); nesse caso use `POSTGRES_HOST=localhost`;
+- a **aplicação rodando fora do Docker**, via `spring.config.import` (`optional:file:./credencias.env[.properties]`); o arquivo traz `POSTGRES_HOST=localhost` e `POSTGRES_PORT=5433` (o Compose publica o banco em `127.0.0.1:5433`); basta `docker compose up -d postgres` e rodar `FlashBookingApplication` (Java 21) a partir da raiz do projeto, sem configurar variáveis na IDE;
 - os **testes**, que não dependem dele: usam um PostgreSQL do Testcontainers com credenciais próprias.
 
 | Variável | Padrão | Descrição |
@@ -453,8 +453,8 @@ Fonte única de credenciais e ajustes. Não há senha padrão no código: a apli
 | `POSTGRES_DB` | (obrigatória) | Nome do banco |
 | `POSTGRES_USER` | (obrigatória) | Usuário |
 | `POSTGRES_PASSWORD` | (obrigatória) | Senha |
-| `POSTGRES_HOST` | `localhost` | Host do banco visto pela aplicação (`postgres` no Compose) |
-| `POSTGRES_PORT` | `5432` | Porta |
+| `POSTGRES_HOST` | `localhost` | Host do banco visto de fora do Docker (IDE); dentro do Compose o `docker-compose.yml` o sobrescreve para `postgres` |
+| `POSTGRES_PORT` | `5432` | Porta (o `credencias.env` usa `5433`, a porta publicada no host; no Compose é sobrescrita para `5432`) |
 | `SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE` | `20` | Tamanho do pool por instância |
 | `SPRING_DATASOURCE_HIKARI_CONNECTION_TIMEOUT` | `3000` | Timeout (ms) para obter conexão; estourar vira 503 |
 | `BOOKING_RESERVATION_TTL`, `BOOKING_RESERVATION_MAX_QUANTITY`, `BOOKING_RESERVATION_EXPIRATION_JOB_ENABLED`, `BOOKING_RESERVATION_EXPIRATION_JOB_DELAY`, `BOOKING_RESERVATION_EXPIRATION_BATCH_SIZE`, `BOOKING_AVAILABILITY_CACHE_ENABLED`, `BOOKING_AVAILABILITY_CACHE_TTL`, `BOOKING_DB_LOCK_TIMEOUT`, `BOOKING_DB_STATEMENT_TIMEOUT` | iguais à tabela acima | Sobrescrevem as propriedades `booking.*` |
