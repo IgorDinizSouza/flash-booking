@@ -248,3 +248,21 @@ docker compose down
 ```
 
 Use `docker compose down -v` apenas se quiser apagar também os dados do banco.
+
+## 6. Postman
+
+A coleção `docs/postman/FlashBooking.postman_collection.json` reproduz todo este roteiro, com as verificações (status, corpo e headers) já escritas em cada requisição e encadeamento automático de `eventId` e `reservationId`.
+
+1. No Postman: **Import** e selecione o arquivo.
+2. A variável `baseUrl` da coleção vale `http://localhost:8080` (Docker). Se for testar a aplicação rodando no IntelliJ, troque por `http://localhost:9090`.
+3. Execute com **Run collection** (Collection Runner), em ordem. As pastas 1 a 5 devem passar inteiras (28 requisições, 75 verificações).
+4. A pasta 4 (múltiplas instâncias) deve rodar com **8 iterações**; o Console do Postman mostra `api1` e `api2` alternando.
+5. A pasta 6 (expiração) é **opcional** e só passa com `BOOKING_RESERVATION_TTL=15s` no `credencias.env` (veja a seção 2.4). Desmarque-a no Runner se estiver com o prazo padrão de 10 minutos.
+
+Sem a interface, a mesma coleção roda por linha de comando (Docker):
+
+```bash
+docker run --rm -v "$PWD/docs/postman":/etc/newman postman/newman run FlashBooking.postman_collection.json --env-var "baseUrl=http://host.docker.internal:8080" --folder "1. Fluxo principal (os 5 endpoints do PDF)" --folder "2. Idempotencia" --folder "3. Sem oversell (sequencial)" --folder "4. Multiplas instancias" --folder "5. Erros explicitos"
+```
+
+O teste de oversell **concorrente** (20 requisições simultâneas) não é possível no Postman, porque o Runner é sequencial; use o `curl ... xargs -P` da seção 2.2 ou o k6.
