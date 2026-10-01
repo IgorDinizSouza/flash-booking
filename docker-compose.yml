@@ -4,6 +4,9 @@ services:
     image: postgres:16
     restart: unless-stopped
     env_file: credencias.env   # POSTGRES_DB, POSTGRES_USER, POSTGRES_PASSWORD
+    # Acesso do host (ex.: rodar a API pelo IntelliJ). Somente localhost; 5433 evita colidir com um Postgres local na 5432.
+    ports:
+      - "127.0.0.1:5433:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
